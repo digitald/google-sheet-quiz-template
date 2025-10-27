@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Inietta il CSS da 'Stile.html' -->
+    <?!= includi('Stile'); ?>
+    <title>Quiz Template</title>
+  </head>
+  <body>
+
+    <!-- Contenitore Principale -->
+    <div class="quiz-container">
+      
+      <header class="quiz-header">
+        <h1>Quiz Template</h1>
+      </header>
+      
+      <!-- Schermata Iniziale ("Trailer") -->
+      <div id="start-container">
+        <h2>Benvenuto/a!</h2>
+        <p>Stai per iniziare il test:</p>
+        <h3 id="start-titolo-test"><?= nomeTest ?></h3>
+        <button id="start-btn" class="btn">Inizia il Quiz</button>
+      </div>
+      
+      <!-- Area Caricamento -->
+      <div id="loading" class="hidden">
+        <p>Caricamento...</p>
+      </div>
+      
+      <!-- Area Quiz -->
+      <div id="quiz-content" class="hidden">
+        
+        <div id="progress-container">
+          <div id="progress-text">Domanda 1 di 10</div>
+          <div id="progress-bar"><div id="progress-bar-inner"></div></div>
+        </div>
+
+        <p id="question-text">Testo della domanda...</p>
+        <ul class="opzioni-list" id="opzioni-container"></ul>
+        <div id="feedback-area"></div>
+        
+        <div class="controls">
+          <button id="suggerimento-btn" class="btn">💡 Suggerimento</button>
+          <button id="avanti-btn" class="btn hidden">Avanti ➔</button>
+        </div>
+        
+      </div>
+      
+      <!-- Area Punteggio Finale -->
+      <div id="score-container" class="hidden">
+        <p id="score-text">Test Completato!</p>
+        <div id="score-percentuale">100%</div>
+        <p id="score-dettaglio">Hai risposto a 10 su 10 domande.</p>
+        
+        <!-- Form di salvataggio -->
+        <div id="salva-form-container">
+          <p>Salva il tuo risultato</p>
+          <input type="text" id="input-nome" placeholder="Il tuo Nome">
+          <input type="text" id="input-cognome" placeholder="Il tuo Cognome">
+          <button id="salva-btn" class="btn">💾 Salva Risultato</button>
+          <p id="salva-feedback"></p>
+        </div>
+      </div>
+      
+    </div> <!-- .quiz-container -->
+
+    <!-- ================= JAVASCRIPT LATO CLIENT ================= -->
+    <script>
+      let statoCorrente = {
+        nomeTest: "<?= nomeTest ?>",
+        domande: [],
+        idxDomandaCorrente: 0,
+        punteggio: 0,
+        rispostaData: false
+      };
+      
+      let risposteDate = []; // Array per salvare le risposte
+
+      // Riferimenti agli elementi DOM
+      const dom = {
+        startContainer: document.getElementById('start-container'),
+        startBtn: document.getElementById('start-btn'),
+        loading: document.getElementById('loading'),
+        quizContent: document.getElementById('quiz-content'),
+        scoreContainer: document.getElementById('score-container'),
+        scorePercentuale: document.getElementById('score-percentuale'),
+        scoreDettaglio: document.getElementById('score-dettaglio'),
+        progressContainer: document.getElementById('progress-container'),
+        progressText: document.getElementById('progress-text'),
+        progressBarInner: document.getElementById('progress-bar-inner'),
+        questionText: document.getElementById('question-text'),
+        opzioniContainer: document.getElementById('opzioni-container'),
+        feedbackArea: document.getElementById('feedback-area'),
+        suggerimentoBtn: document.getElementById('suggerimento-btn'),
+        avantiBtn: document.getElementById('avanti-btn'),
+        salvaForm: document.getElementById('salva-form-container'),
+        salvaBtn: document.getElementById('salva-btn'),
+        salvaFeedback: document.getElementById('salva-feedback'),
+        inputNome: document.getElementById('input-nome'),
+        inputCognome: document.getElementById('input-cognome')
+      };
+
+      /**
+       * Avvio
+       */
+      document.addEventListener('DOMContentLoaded', () => {
+        dom.startBtn.addEventListener('click', avviaCaricamentoQuiz);
+        dom.suggerimentoBtn.addEventListener('click', mostraSuggerimento);
+        dom.avantiBtn.addEventListener('click', prossimaDomanda);
+        dom.salvaBtn.addEventListener('click', salvaRisultato);
+      });
+
+      function avviaCaricamentoQuiz() {
+        dom.startContainer.classList.add('hidden');
+        dom.loading.classList.remove('hidden');
+
+        google.script.run
+          .withSuccessHandler(onDomandeCaricate)
+          .withFailureHandler(onErroreCaricamento)
+          .getDomande(statoCorrente.nomeTest);
+      }
+
+      function onDomandeCaricate(risultato) {
+        if (risultato.errore) {
+          onErroreCaricamento({ message: risultato.errore });
+          return;
+        }
+        
+        statoCorrente.domande = risultato.domande;
+        
+        if (statoCorrente.domande.length === 0) {
+          onErroreCaricamento({ message: 'Nessuna domanda trovata in questo test.' });
+          return;
+        }
+        
+        dom.loading.classList.add('hidden');
+        dom.quizContent.classList.remove('hidden');
+        mostraDomanda();
+      }
+
+      function onErroreCaricamento(errore) {
+        dom.loading.innerHTML = `<p style="color: red;">Errore: ${errore.message}</p>`;
+      }
+      
+      function mostraDomanda() {
+        // Resetta stato
+        statoCorrente.rispostaData = false;
+        dom.feedbackArea.innerHTML = '';
+        dom.avantiBtn.classList.add('hidden');
+        dom.suggerimentoBtn.classList.remove('hidden');
+        
+        aggiornaProgresso();
+        
+        const d = statoCorrente.domande[statoCorrente.idxDomandaCorrente];
+        dom.questionText.textContent = d.domanda;
+        dom.opzioniContainer.innerHTML = '';
+        
+        d.opzioni.forEach(opzioneTesto => {
+          const li = document.createElement('li');
+          const btn = document.createElement('button');
+          btn.className = 'opzione-btn';
+          btn.textContent = opzioneTesto;
+          btn.addEventListener('click', () => selezionaRisposta(btn, opzioneTesto));
+          li.appendChild(btn);
+          dom.opzioniContainer.appendChild(li);
+        });
+      }
+      
+      function aggiornaProgresso() {
+        const idx = statoCorrente.idxDomandaCorrente + 1;
+        const totale = statoCorrente.domande.length;
+        const percentuale = (idx / totale) * 100;
+        dom.progressText.textContent = `Domanda ${idx} di ${totale}`;
+        dom.progressBarInner.style.width = `${percentuale}%`;
+      }
+
+      function selezionaRisposta(btnCliccato, testoRisposta) {
+        if (statoCorrente.rispostaData) return; 
+        statoCorrente.rispostaData = true;
+
+        const d = statoCorrente.domande[statoCorrente.idxDomandaCorrente];
+        risposteDate.push({ id: d.id, risposta: testoRisposta });
+
+        const tuttiIBottoni = dom.opzioniContainer.querySelectorAll('.opzione-btn');
+        tuttiIBottoni.forEach(btn => {
+          btn.disabled = true;
+          btn.classList.add('disabled');
+        });
+        
+        dom.suggerimentoBtn.classList.add('hidden');
+        
+        const testoCorretto = d.rispostaCorretta;
+
+        tuttiIBottoni.forEach(btn => {
+          if (btn.textContent === testoCorretto) btn.classList.add('corretto');
+          else if (btn.textContent === testoRisposta) btn.classList.add('sbagliato');
+        });
+
+        let feedbackHTML = '';
+        if (testoRisposta === testoCorretto) {
+          statoCorrente.punteggio++;
+          feedbackHTML = '<h3>✅ Corretto!</h3>';
+        } else {
+          feedbackHTML = `<h3>❌ Sbagliato.</h3><p>La risposta corretta era: <strong>${testoCorretto}</strong></p>`;
+        }
+        
+        if (d.correzione) {
+          feedbackHTML += `<hr><p>${d.correzione}</p>`;
+        }
+        
+        dom.feedbackArea.innerHTML = `<div class="feedback-box correzione">${feedbackHTML}</div>`;
+        dom.avantiBtn.classList.remove('hidden');
+      }
+
+      function mostraSuggerimento() {
+        const d = statoCorrente.domande[statoCorrente.idxDomandaCorrente];
+        if (d.suggerimento) {
+          dom.feedbackArea.innerHTML = `<div class="feedback-box suggerimento">${d.suggerimento}</div>`;
+          dom.suggerimentoBtn.classList.add('hidden'); 
+        } else {
+          dom.feedbackArea.innerHTML = `<div class="feedback-box suggerimento">Nessun suggerimento disponibile.</div>`;
+        }
+      }
+
+      function prossimaDomanda() {
+        statoCorrente.idxDomandaCorrente++;
+        if (statoCorrente.idxDomandaCorrente < statoCorrente.domande.length) {
+          mostraDomanda();
+        } else {
+          mostraPunteggio();
+        }
+      }
+
+      function mostraPunteggio() {
+        dom.quizContent.classList.add('hidden');
+        dom.scoreContainer.classList.remove('hidden');
+        
+        const totale = statoCorrente.domande.length;
+        const punti = statoCorrente.punteggio;
+        const percentuale = Math.round((punti / totale) * 100);
+        
+        dom.scorePercentuale.textContent = `${percentuale}%`;
+        dom.scoreDettaglio.textContent = `Hai risposto correttamente a ${punti} su ${totale} domande.`;
+      }
+
+      // --- Logica di Salvataggio ---
+
+      function salvaRisultato() {
+        const nome = dom.inputNome.value.trim();
+        const cognome = dom.inputCognome.value.trim();
+        
+        if (nome === "" || cognome === "") {
+          mostraFeedbackSalvataggio("Errore: Inserisci nome e cognome.", "red");
+          return;
+        }
+        
+        dom.salvaBtn.disabled = true;
+        dom.salvaBtn.textContent = "Salvataggio...";
+        
+        const datiStudente = { nome: nome, cognome: cognome, risposte: risposteDate };
+        
+        google.script.run
+          .withSuccessHandler(onRisultatoSalvato)
+          .withFailureHandler(onErroreSalvataggio)
+          .salvaRisultati(datiStudente, statoCorrente.nomeTest);
+      }
+      
+      function onRisultatoSalvato(risultato) {
+        if (risultato.success) {
+          dom.salvaBtn.textContent = "✅ Salvato!";
+          dom.salvaForm.style.display = 'none';
+          mostraFeedbackSalvataggio(`Salvato! (Punteggio: ${risultato.punteggio})`, "green");
+        } else {
+          onErroreSalvataggio({ message: risultato.message });
+        }
+      }
+      
+      function onErroreSalvataggio(errore) {
+        dom.salvaBtn.disabled = false;
+        dom.salvaBtn.textContent = "💾 Riprova";
+        mostraFeedbackSalvataggio(`Errore: ${errore.message}`, "red");
+      }
+      
+      function mostraFeedbackSalvataggio(testo, colore) {
+        dom.salvaFeedback.textContent = testo;
+        dom.salvaFeedback.style.color = colore;
+      }
+    </script>
+  </body>
+</html>
